@@ -1,6 +1,9 @@
 const express = require('express');
 const RestaurantsMemcachedActions = require('./model/restaurantsMemcachedActions');
 
+var AWS = require("aws-sdk");
+var ddb =  new AWS.DynamoDB.DocumentClient();
+
 const app = express();
 app.use(express.json());
 
@@ -16,66 +19,261 @@ app.get('/', (req, res) => {
         MEMCACHED_CONFIGURATION_ENDPOINT: MEMCACHED_CONFIGURATION_ENDPOINT,
         TABLE_NAME: TABLE_NAME,
         AWS_REGION: AWS_REGION,
-        USE_CACHE: USE_CACHE
+        // USE_CACHE: USE_CACHE
     };
     res.send(response);
 });
 
 app.post('/restaurants', async (req, res) => {
     const restaurant = req.body;
-
-    // Students TODO: Implement the logic to add a restaurant
-    res.status(404).send("need to implement");
+    var params = {
+        TableName: TABLE_NAME,
+        Key: {
+            name: restaurant.name,
+        }
+    };
+    const data = await ddb.get(params).promise();
+    if (data.Item) {
+        return res.status(409).send({ success: false, message: 'Restaurant already exists' });
+    } else {
+        const putParams = {
+            TableName: TABLE_NAME,
+            Item: {
+                name: restaurant.name,
+                cuisine: restaurant.cuisine,
+                region: restaurant.region,
+                rating: 0
+            }
+        };
+        await ddb.put(putParams).promise();
+        res.send({ success: true });
+    }
 });
 
 app.get('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
-
-    // Students TODO: Implement the logic to get a restaurant by name
-    res.status(404).send("need to implement");
+    var params = {
+        TableName: TABLE_NAME,
+        Key: {
+            name: restaurantName
+        }
+    };
+    const data = await ddb.get(params).promise();
+    if (data.Item) {
+        res.status(200).send({ name:data.Item.name, cuisine: data.Item.cuisine, rating: data.Item.rating, region: data.Item.region });
+    } else {
+        res.status(404).send({ success: false, message: 'Restaurant not found' });
+    }
 });
 
 app.delete('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
+    var params = {
+        TableName: TABLE_NAME,
+        Key: {
+            name: restaurantName
+        }
+    };
     
-    // Students TODO: Implement the logic to delete a restaurant by name
-    res.status(404).send("need to implement");
+    ddb.delete(params, function(err, data) {
+        if (err) {
+            res.status(404).send({ success: false, message: 'Restaurant not found' });
+        } else {
+            res.status(200).send({ success: true });
+        }
+    });
 });
 
 app.post('/restaurants/rating', async (req, res) => {
     const restaurantName = req.body.name;
     const rating = req.body.rating;
     
-    // Students TODO: Implement the logic to add a rating to a restaurant
-    res.status(404).send("need to implement");
+    // Retrieve current restaurant data
+    var getParams = {
+        TableName: TABLE_NAME,
+        Key: {
+            name: restaurantName
+        }
+    };
+
+    try {
+        const data = await ddb.get(getParams).promise();
+        if (!data.Item) {
+            return res.status(404).send({ success: false, message: 'Restaurant not found' });
+        }
+
+        const currentRating = data.Item.rating || 0;
+        const numRatings = data.Item.numRatings || 0;
+
+        // Calculate new average rating
+        const updatedRating = ((currentRating * numRatings) + rating) / (numRatings + 1);
+        const updatedNumRatings = numRatings + 1;
+
+        // Update restaurant with new rating and numRatings
+        var updateParams = {
+            TableName: TABLE_NAME,
+            Key: {
+                name: restaurantName
+            },
+            UpdateExpression: "set rating = :r, numRatings = :n",
+            ExpressionAttributeValues: {
+                ":r": updatedRating,
+                ":n": updatedNumRatings
+            },
+            ReturnValues: "UPDATED_NEW"
+        };
+
+        const updateData = await ddb.update(updateParams).promise();
+        res.status(200).send({ success: true });
+
+    } catch (err) {
+        res.status(400).send({ success: false, message: 'Error updating rating', error: err.message });
+    }
 });
 
 app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
     const cuisine = req.params.cuisine;
     let limit = req.query.limit;
     
-    // Students TODO: Implement the logic to get top rated restaurants by cuisine
-    res.status(404).send("need to implement");
+    // Validate and adjust limit
+    if (limit) {
+        limit = parseInt(limit);
+        if (limit < 10) limit = 10;
+        else if (limit > 100) limit = 100;
+    }
+
+    var params = {
+        TableName: TABLE_NAME,
+        FilterExpression: "#cuisine = :cuisine",
+        ExpressionAttributeNames: {
+            "#cuisine": "cuisine"
+        },
+        ExpressionAttributeValues: {
+            ":cuisine": cuisine
+        }
+    };
+
+    try {
+        const data = await ddb.scan(params).promise();
+        const restaurants = data.Items;
+
+        // Sort restaurants by rating in descending order
+        restaurants.sort((a, b) => b.rating - a.rating);
+
+        // Apply the limit if specified
+        const limitedRestaurants = limit ? restaurants.slice(0, limit) : restaurants;
+
+        // Format response
+        const response = limitedRestaurants.map(restaurant => ({
+            name: restaurant.name,
+            cuisine: restaurant.cuisine,
+            rating: restaurant.rating,
+            region: restaurant.region
+        }));
+
+        res.status(200).send(response);
+    } catch (err) {
+        res.status(400).send({ success: false, message: 'Error getting restaurants', error: err.message });
+    }
 });
 
 app.get('/restaurants/region/:region', async (req, res) => {
     const region = req.params.region;
     let limit = req.query.limit;
     
-    // Students TODO: Implement the logic to get top rated restaurants by region
-    res.status(404).send("need to implement");
+    // Validate and adjust limit
+    if (limit) {
+        limit = parseInt(limit);
+        if (limit < 10) limit = 10;
+        else if (limit > 100) limit = 100;
+    }
+
+    var params = {
+        TableName: TABLE_NAME,
+        FilterExpression: "#region = :region",
+        ExpressionAttributeNames: {
+            "#region": "region"
+        },
+        ExpressionAttributeValues: {
+            ":region": region
+        }
+    };
+
+    try {
+        const data = await ddb.scan(params).promise();
+        const restaurants = data.Items;
+
+        // Sort restaurants by rating in descending order
+        restaurants.sort((a, b) => b.rating - a.rating);
+
+        // Apply the limit if specified
+        const limitedRestaurants = limit ? restaurants.slice(0, limit) : restaurants;
+
+        // Format response
+        const response = limitedRestaurants.map(restaurant => ({
+            name: restaurant.name,
+            cuisine: restaurant.cuisine,
+            rating: restaurant.rating,
+            region: restaurant.region
+        }));
+
+        res.status(200).send(response);
+    } catch (err) {
+        res.status(400).send({ success: false, message: 'Error getting restaurants', error: err.message });
+    }
 });
 
 app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
     const region = req.params.region;
     const cuisine = req.params.cuisine;
+    let limit = req.query.limit;
 
-    // Students TODO: Implement the logic to get top rated restaurants by region and cuisine
-    res.status(404).send("need to implement");
+    // Validate and adjust limit
+    if (limit) {
+        limit = parseInt(limit);
+        if (limit < 10) limit = 10;
+        else if (limit > 100) limit = 100;
+    }
+
+    var params = {
+        TableName: TABLE_NAME,
+        FilterExpression: "#region = :region and #cuisine = :cuisine",
+        ExpressionAttributeNames: {
+            "#region": "region",
+            "#cuisine": "cuisine"
+        },
+        ExpressionAttributeValues: {
+            ":region": region,
+            ":cuisine": cuisine
+        }
+    };
+
+    try {
+        const data = await ddb.scan(params).promise();
+        const restaurants = data.Items;
+
+        // Sort restaurants by rating in descending order
+        restaurants.sort((a, b) => b.rating - a.rating);
+
+        // Apply the limit if specified
+        const limitedRestaurants = limit ? restaurants.slice(0, limit) : restaurants;
+
+        // Format response
+        const response = limitedRestaurants.map(restaurant => ({
+            name: restaurant.name,
+            cuisine: restaurant.cuisine,
+            rating: restaurant.rating,
+            region: restaurant.region
+        }));
+
+        res.status(200).send(response);
+    } catch (err) {
+        res.status(400).send({ success: false, message: 'Error getting restaurants', error: err.message });
+    }
 });
 
-app.listen(80, () => {
-    console.log('Server is running on http://localhost:80');
+app.listen(3001, () => {
+    console.log('Server is running on http://localhost:3001');
 });
 
 module.exports = { app };
