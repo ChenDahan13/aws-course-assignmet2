@@ -26,6 +26,15 @@ app.get('/', (req, res) => {
 
 app.post('/restaurants', async (req, res) => {
     const restaurant = req.body;
+    
+    // Check cache first
+    if (USE_CACHE) {
+        const cacheResponse = await memcachedActions.getRestaurants(restaurant.name);
+        if (cacheResponse) { // If cache hit, return the response
+            return res.status(409).send({ success: false, message: 'Restaurant already exists' });
+        }
+    }
+    
     var params = {
         TableName: TABLE_NAME,
         Key: {
@@ -46,21 +55,34 @@ app.post('/restaurants', async (req, res) => {
             }
         };
         await ddb.put(putParams).promise();
+        // Update cache
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(restaurant.name, putParams.Item);
+        }
         res.send({ success: true });
     }
 });
 
 app.get('/restaurants/:restaurantName', async (req, res) => {
     const restaurantName = req.params.restaurantName;
+    
+    // Checking cache first
+    if (USE_CACHE) {
+        const cacheResponse = await memcachedActions.getRestaurants(restaurantName);
+        if (cacheResponse) { // If cache hit, return the response
+            return res.status(200).send( { name: cacheResponse.name, cuisine: cacheResponse.cuisine, rating: cacheResponse.rating, region: cacheResponse.region});
+        }
+    }
+    
     var params = {
         TableName: TABLE_NAME,
         Key: {
             name: restaurantName
         }
     };
-    const data = await ddb.get(params).promise();
+    const data = await ddb.get(params).promise(); // Check if restaurant exists in DynamoDB and return it
     if (data.Item) {
-        res.status(200).send({ name:data.Item.name, cuisine: data.Item.cuisine, rating: data.Item.rating, region: data.Item.region });
+        res.status(200).send({ name: data.Item.name, cuisine: data.Item.cuisine, rating: data.Item.rating, region: data.Item.region });
     } else {
         res.status(404).send({ success: false, message: 'Restaurant not found' });
     }
@@ -74,6 +96,11 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
             name: restaurantName
         }
     };
+
+    // Delete from cache
+    if (USE_CACHE) {
+        await memcachedActions.deleteRestaurants(restaurantName);
+    }
     
     ddb.delete(params, function(err, data) {
         if (err) {
@@ -98,7 +125,7 @@ app.post('/restaurants/rating', async (req, res) => {
 
     try {
         const data = await ddb.get(getParams).promise();
-        if (!data.Item) {
+        if (!data.Item) { // Check if restaurant exists in DynamoDB
             return res.status(404).send({ success: false, message: 'Restaurant not found' });
         }
 
@@ -124,6 +151,13 @@ app.post('/restaurants/rating', async (req, res) => {
         };
 
         const updateData = await ddb.update(updateParams).promise();
+
+        // Update cache
+        if (USE_CACHE) {
+            const updatedRestaurant = { ...data.Item, rating: updatedRating, numRatings: updatedNumRatings };
+            await memcachedActions.addRestaurants(updatedRestaurant.name, updatedRestaurant);
+        }
+
         res.status(200).send({ success: true });
 
     } catch (err) {
@@ -141,7 +175,8 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
         if (limit < 10) limit = 10;
         else if (limit > 100) limit = 100;
     }
-
+    
+    // Filter restaurants by cuisine
     var params = {
         TableName: TABLE_NAME,
         FilterExpression: "#cuisine = :cuisine",
@@ -187,7 +222,8 @@ app.get('/restaurants/region/:region', async (req, res) => {
         if (limit < 10) limit = 10;
         else if (limit > 100) limit = 100;
     }
-
+    
+    // Filter restaurants by region
     var params = {
         TableName: TABLE_NAME,
         FilterExpression: "#region = :region",
@@ -273,7 +309,7 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
 });
 
 app.listen(3001, () => {
-    console.log('Server is running on http://localhost:3001');
+    console.log('Server is running on http://localhost:80');
 });
 
 module.exports = { app };
