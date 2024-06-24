@@ -73,7 +73,7 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
             return res.status(200).send( { name: cacheResponse.name, cuisine: cacheResponse.cuisine, rating: cacheResponse.rating, region: cacheResponse.region});
         }
     }
-    
+
     var params = {
         TableName: TABLE_NAME,
         Key: {
@@ -308,7 +308,7 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
     }
 });
 
-app.listen(3001, () => {
+app.listen(80, () => {
     console.log('Server is running on http://localhost:80');
 });
 
