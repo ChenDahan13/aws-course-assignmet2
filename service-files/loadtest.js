@@ -2,7 +2,7 @@ const http = require('http');
 const assert = require('assert');
 const path = require('path');
 
-const endPoint = 'Restau-LB8A1-c4kz6zh2C3Jm-2133662552.us-east-1.elb.amazonaws.com';
+const endPoint = 'Restau-LB8A1-CvPF9bf0NvOC-1133664449.us-east-1.elb.amazonaws.com';
 const port = 80;
 
 // Function to make HTTP requests
@@ -33,8 +33,6 @@ const makeRequest = (options, postData = null) => {
 // Test for DELETE /restaurants/:restaurantName
 const testDeleteRestaurant = async (restaurantName) => {
     
-    console.log('restaurantName:', restaurantName);
-    
     // Delete the restaurant
     const optionsDelete = {
         hostname: endPoint,
@@ -42,9 +40,8 @@ const testDeleteRestaurant = async (restaurantName) => {
         path: `/restaurants/${restaurantName}`,
         method: 'DELETE'
     };
-    console.log('DELETE /restaurants options:', optionsDelete);
+    
     const responseDelete = await makeRequest(optionsDelete);
-    console.log(`DELETE /restaurants/${restaurantName} response:`, responseDelete);
     assert.strictEqual(responseDelete.statusCode, 200, 'Expected status code 200');
 
     // Try to get the deleted restaurant
@@ -55,7 +52,6 @@ const testDeleteRestaurant = async (restaurantName) => {
         method: 'GET'
     };
     const responseGet = await makeRequest(optionsGet);
-    console.log(`GET /restaurants/${restaurantName} after delete response:`, responseGet);
     assert.strictEqual(responseGet.statusCode, 404, 'Expected status code 404 for a deleted restaurant');
 };
 
